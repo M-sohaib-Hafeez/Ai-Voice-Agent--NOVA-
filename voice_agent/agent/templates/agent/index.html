@@ -1,147 +1,215 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>NOVA — AI Voice Agent</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:ital,wght@0,300;0,400;1,300&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&family=Martian+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="{% static 'agent/css/main.css' %}" />
 </head>
 <body>
 
-  <!-- Background orbs -->
-  <div class="orb orb-1"></div>
-  <div class="orb orb-2"></div>
-  <div class="orb orb-3"></div>
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="brand-mark">N</div>
+      <div class="brand-text">
+        <span class="brand-name">NOVA</span>
+        <span class="brand-ver">Voice Agent v1.0</span>
+      </div>
+    </div>
 
-  <div class="layout">
+    <div class="topbar-center">
+      <span class="model-chip">
+        <span class="model-dot"></span>
+        llama-3.1-8b-instant
+      </span>
+    </div>
 
-    <!-- ── LEFT PANEL ──────────────────────────────────────────────── -->
-    <aside class="sidebar">
-      <div class="brand">
-        <div class="brand-icon">N</div>
-        <div>
-          <div class="brand-name">NOVA</div>
-          <div class="brand-sub">Voice Agent v1.0</div>
-        </div>
+    <div class="topbar-right">
+      <div class="stat-pill">
+        <span class="stat-label">Turns</span>
+        <span id="turn-count" class="stat-val">0</span>
+      </div>
+      <div class="stat-pill">
+        <span id="status-dot" class="stat-val status-idle">Idle</span>
       </div>
 
-      <div class="stack-badge">
-        <div class="stack-title">Tech Stack</div>
-        <div class="stack-item">
-          <span class="dot dot-purple"></span>
-          <span>Whisper Large v3</span>
-          <span class="tag">STT</span>
-        </div>
-        <div class="stack-item">
-          <span class="dot dot-blue"></span>
-          <span>LLaMA 3.1 8B</span>
-          <span class="tag">LLM</span>
-        </div>
-        <div class="stack-item">
-          <span class="dot dot-green"></span>
-          <span>Groq API</span>
-          <span class="tag">Infra</span>
-        </div>
-        <div class="stack-item">
-          <span class="dot dot-orange"></span>
-          <span>Django 4.2</span>
-          <span class="tag">Backend</span>
-        </div>
-        <div class="stack-item">
-          <span class="dot dot-pink"></span>
-          <span>Web Speech API</span>
-          <span class="tag">TTS</span>
+      <button class="icon-btn" id="themeBtn" aria-label="Toggle theme" title="Toggle light/dark">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="5"/>
+          <line x1="12" y1="1" x2="12" y2="3"/>
+          <line x1="12" y1="21" x2="12" y2="23"/>
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+          <line x1="1" y1="12" x2="3" y2="12"/>
+          <line x1="21" y1="12" x2="23" y2="12"/>
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+        </svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
+
+      <button class="icon-btn" id="infoBtn" aria-label="System info" title="System info">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+      </button>
+
+      <button class="icon-btn" id="clearBtn" aria-label="New session" title="New Session">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="1 4 1 10 7 10"/>
+          <path d="M3.51 15a9 9 0 1 0 .49-3.5"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="main">
+
+    <div class="transcript-feed" id="transcriptFeed">
+      <div class="welcome-wrap">
+        <div class="welcome-inner">
+          <div class="welcome-glyph">
+            <svg viewBox="0 0 60 60" fill="none">
+              <circle cx="30" cy="30" r="28" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 3" opacity="0.3"/>
+              <path d="M30 16a6 6 0 0 0-6 6v10a6 6 0 0 0 12 0V22a6 6 0 0 0-6-6z" stroke="currentColor" stroke-width="1.8" fill="none"/>
+              <path d="M22 30v2a8 8 0 0 0 16 0v-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+              <line x1="30" y1="40" x2="30" y2="44" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+              <line x1="26" y1="44" x2="34" y2="44" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <p class="welcome-heading">Ready to listen</p>
+          <p class="welcome-sub">Hold the mic and speak, or type below.<br/>NOVA will transcribe and reply.</p>
         </div>
       </div>
+    </div>
 
-      <div class="dl-note">
-        <div class="dl-title">⚡ Deep Learning Core</div>
-        <div class="dl-body">
-          Whisper is a Transformer encoder-decoder trained on <strong>680,000 hrs</strong> of multilingual speech data. Runs on Groq's LPU hardware — zero latency.
-        </div>
-      </div>
-
-      <div class="session-info">
-        <div class="session-row">
-          <span>Turns</span>
-          <span id="turn-count" class="session-val">0</span>
-        </div>
-        <div class="session-row">
-          <span>Status</span>
-          <span id="status-dot" class="session-val status-idle">Idle</span>
-        </div>
-      </div>
-
-      <button class="clear-btn" id="clearBtn">↺ New Session</button>
-    </aside>
-
-    <!-- ── MAIN PANEL ──────────────────────────────────────────────── -->
-    <main class="main">
-
-      <header class="topbar">
-        <div class="topbar-title">AI Voice Agent <span class="topbar-model">llama-3.1-8b-instant</span></div>
-        <div class="topbar-mode" id="modeLabel">Push-to-Talk Mode</div>
-      </header>
-
-      <!-- Transcript feed -->
-      <div class="transcript-feed" id="transcriptFeed">
-        <div class="welcome-msg">
-          <div class="welcome-icon">🎙</div>
-          <div class="welcome-text">Hold the mic button and speak.<br/>NOVA will transcribe and reply.</div>
-        </div>
-      </div>
-
-      <!-- Controls -->
-      <div class="controls">
-
-        <!-- Status bar -->
+    <div class="controls">
+      <div class="status-row">
         <div class="status-bar" id="statusBar">
+          <div class="status-indicator" id="statusIndicator"></div>
           <span id="statusText">Ready — press and hold to record</span>
-          <div class="audio-bars" id="audioBars">
-            <span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <div class="audio-bars" id="audioBars">
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
+      </div>
+
+      <div class="mic-section">
+        <button class="mic-btn" id="micBtn" aria-label="Hold to record">
+          <div class="mic-ripple"></div>
+          <div class="mic-ripple mic-ripple-2"></div>
+          <svg class="mic-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            <line x1="12" y1="19" x2="12" y2="23"/>
+            <line x1="8" y1="23" x2="16" y2="23"/>
+          </svg>
+        </button>
+        <span class="mic-label">Hold to speak</span>
+      </div>
+
+      <div class="text-row">
+        <input
+          type="text"
+          id="textInput"
+          class="text-input"
+          placeholder="Or type your message…"
+          autocomplete="off"
+        />
+        <button class="send-btn" id="sendBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="22" y1="2" x2="11" y2="13"/>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </main>
+
+  <div class="panel-backdrop" id="panelBackdrop"></div>
+
+  <aside class="info-panel" id="infoPanel" aria-hidden="true">
+    <div class="panel-header">
+      <span class="panel-title">System Info</span>
+      <button class="panel-close" id="panelClose" aria-label="Close panel">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"/>
+          <line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="panel-body"> 
+      
+      <section class="panel-section">
+        <h3 class="section-label">Tech Stack</h3>
+        <ul class="stack-list">
+          <li class="stack-item">
+            <span class="stack-dot" style="--c:#a78bfa"></span>
+            <span class="stack-name">Whisper Large v3</span>
+            <span class="stack-tag">STT</span>
+          </li>
+          <li class="stack-item">
+            <span class="stack-dot" style="--c:#60a5fa"></span>
+            <span class="stack-name">LLaMA 3.1 8B</span>
+            <span class="stack-tag">LLM</span>
+          </li>
+          <li class="stack-item">
+            <span class="stack-dot" style="--c:#34d399"></span>
+            <span class="stack-name">Groq API</span>
+            <span class="stack-tag">Infra</span>
+          </li>
+          <li class="stack-item">
+            <span class="stack-dot" style="--c:#fbbf24"></span>
+            <span class="stack-name">Django 4.2</span>
+            <span class="stack-tag">Backend</span>
+          </li>
+          <li class="stack-item">
+            <span class="stack-dot" style="--c:#f472b6"></span>
+            <span class="stack-name">Web Speech API</span>
+            <span class="stack-tag">TTS</span>
+          </li>
+        </ul>
+      </section>
+      
+      <section class="panel-section">
+        <h3 class="section-label">Deep Learning Core</h3>
+        <div class="dl-card">
+          <div class="dl-icon">⚡</div>
+          <p class="dl-text">
+            Whisper is a Transformer encoder-decoder trained on
+            <strong>680,000 hrs</strong> of multilingual speech data.
+            Runs on Groq's LPU hardware — near-zero latency.
+          </p>
+        </div>
+      </section>
+
+      <section class="panel-section">
+        <h3 class="section-label">Session</h3>
+        <div class="session-grid">
+          <div class="session-card">
+            <span class="session-val" id="panel-turns">0</span>
+            <span class="session-key">Turns</span>
+          </div>
+          <div class="session-card">
+            <span class="session-val session-status" id="panel-status">Idle</span>
+            <span class="session-key">Status</span>
           </div>
         </div>
+      </section>
 
-        <!-- Mic button -->
-        <div class="mic-wrap">
-          <button
-            class="mic-btn"
-            id="micBtn"
-            aria-label="Hold to record"
-          >
-            <svg class="mic-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-              <line x1="12" y1="19" x2="12" y2="23"/>
-              <line x1="8" y1="23" x2="16" y2="23"/>
-            </svg>
-            <div class="mic-ring"></div>
-          </button>
-          <div class="mic-label">Hold to speak</div>
-        </div>
+      <button class="panel-clear-btn" id="panelClearBtn">↺ New Session</button>
+    </div>
+  </aside>
 
-        <!-- Text fallback input -->
-        <div class="text-input-wrap">
-          <input
-            type="text"
-            id="textInput"
-            class="text-input"
-            placeholder="Or type your message here…"
-            autocomplete="off"
-          />
-          <button class="send-btn" id="sendBtn">Send</button>
-        </div>
-
-      </div>
-
-    </main>
-  </div>
-
-  <!-- CSRF token for Django -->
   <input type="hidden" id="csrfToken" value="{{ csrf_token }}" />
 
   <script src="{% static 'agent/js/voice.js' %}"></script>
