@@ -250,10 +250,11 @@ requests>=2.31.0
  
 ## 👥 Team
  
-| Name | Role |
-|---|---|
-| Muhammad Sohaib Hafeez | Backend (Django, Groq API, Tavily, views.py) |
-| [Partner Name] | Frontend (HTML, CSS, JS — theme, info panel, UI redesign) |
+| Name | Roll no  | Roll  |
+|---|---|---|
+| Muhammad Sohaib Hafeez | 24F-CS-085 | Backend |
+| Maham Siddiqui  | 24F-CS-070 | Backend |
+| Mubahsir Awan | 24F-CS-074 | Frontend |
  
 ---
  
