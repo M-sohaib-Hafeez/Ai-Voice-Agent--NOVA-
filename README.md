@@ -254,7 +254,7 @@ requests>=2.31.0
 |---|---|---|
 | Muhammad Sohaib Hafeez | 24F-CS-085 | Backend |
 | Maham Siddiqui  | 24F-CS-070 | Backend |
-| Mubahsir Awan | 24F-CS-074 | Frontend |
+| Mubashir Awan | 24F-CS-074 | Frontend |
  
 ---
  
