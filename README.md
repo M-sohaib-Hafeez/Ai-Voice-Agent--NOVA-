@@ -1,6 +1,6 @@
 # 🎙 NOVA — AI Voice Agent
  
-> **Django + Groq Whisper + LLaMA 3.3 70B + Tavily Web Search + Web Speech API**
+> **Django + Groq Whisper + LLaMA 3.3 70B + Tavily Web Search + Genius Song Recognition + Web Speech API**
 > Built for DUET CS Artificial Intelligence Course Project — 2025
  
 ---
@@ -12,8 +12,10 @@ Browser Mic (MediaRecorder)
         ↓  audio blob (webm)
 Django View → Groq Whisper Large v3     ← Deep Learning STT
         ↓  transcript (English-forced)
-Django View → Tavily Web Search API     ← Live data (if needed)
-        ↓  search context injected into prompt
+Django View → Genius API                ← Song recognition (if lyrics detected)
+        ↓  OR
+Django View → Tavily Web Search API     ← Live data (if current events detected)
+        ↓  context injected into prompt
 Django View → Groq LLaMA 3.3 70B       ← Free, ultra-fast LLM
         ↓  English-only reply
 Browser SpeechSynthesis                 ← Built-in TTS, English voice
@@ -35,14 +37,13 @@ This satisfies the Deep Learning requirement of the AI course project.
 - 🧠 **Whisper Large v3** Deep Learning speech-to-text (English-forced transcription)
 - ⚡ **Groq LLaMA 3.3 70B** — free, ultra-fast LLM responses
 - 🌐 **Tavily Web Search** — live current affairs, news, scores, prices
+- 🎵 **Genius Song Recognition** — identify songs from lyrics snippets
 - 🔊 **Browser TTS** — English voice with 8-level priority voice picker
 - 💬 **Session Memory** — remembers last 10 turns of conversation
 - ⌨️ **Text Input Fallback** — type instead of speaking
 - 🌙 **Dark / Light Theme Toggle** — persisted in localStorage
 - ℹ️ **Slide-out Info Panel** — tech stack, deep learning info, live session stats
-- 📊 **Live Status Indicator** — animated dot showing Idle / Recording / Thinking / Speaking
-- 📱 **Mobile Responsive** — panel collapses correctly on small screens
-- ⌨️ **Keyboard Shortcut** — press `Escape` to close the info panel
+- 📱 **Mobile Responsive** — works on all screen sizes
 ---
  
 ## ⚡ Quick Start
@@ -67,15 +68,18 @@ pip install -r requirements.txt
  
 ### 4. Set up API keys
 ```bash
-# Copy the example env file and rename it to .env
-cp .env.example .env        # Mac/Linux
-copy .env.example .env      # Windows CMD
+# Windows CMD
+copy .env.example .env
+ 
+# Mac/Linux
+cp .env.example .env
 ```
  
 Open `.env` and fill in your keys:
 ```
 GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxx
 TAVILY_API_KEY=tvly-xxxxxxxxxxxxxxxxxxxx
+GENIUS_API_KEY=your_genius_token_here
 DJANGO_SECRET_KEY=any-random-string-here
 ```
  
@@ -83,6 +87,7 @@ DJANGO_SECRET_KEY=any-random-string-here
 |---|---|---|
 | `GROQ_API_KEY` | https://console.groq.com | Free |
 | `TAVILY_API_KEY` | https://app.tavily.com | Free tier available |
+| `GENIUS_API_KEY` | https://genius.com/api-clients | Free |
  
 ### 5. Run migrations (first time only)
 ```bash
@@ -118,19 +123,19 @@ voice_agent/
 ├── db.sqlite3                     ← auto-created by migrate
 │
 ├── voice_agent_project/           ← Django project config
-│   ├── settings.py                ← GROQ_API_KEY, TAVILY_API_KEY, middleware
+│   ├── settings.py                ← all API keys, middleware, database
 │   ├── urls.py
 │   └── wsgi.py
 │
 └── agent/                         ← Main Django app
-    ├── views.py                   ← All backend logic (STT + web search + LLM)
+    ├── views.py                   ← All backend logic (STT + search + LLM)
     ├── urls.py                    ← 4 API endpoints
     ├── apps.py
     ├── templates/agent/
     │   └── index.html             ← Main UI (topbar, transcript feed, info panel)
     └── static/agent/
         ├── css/main.css           ← Dark/light theme, animations, responsive layout
-        └── js/voice.js            ← Recording, API calls, theme toggle, info panel
+        └── js/voice.js            ← Recording, API calls, TTS, theme toggle
 ```
  
 ---
@@ -141,7 +146,7 @@ voice_agent/
 |---|---|---|
 | `/` | GET | Main voice agent UI |
 | `/api/transcribe/` | POST | Audio blob → Groq Whisper → English transcript |
-| `/api/chat/` | POST | Text → (optional Tavily search) → LLaMA reply |
+| `/api/chat/` | POST | Text → (Genius / Tavily / LLaMA) → reply |
 | `/api/clear/` | POST | Clear conversation session history |
  
 ---
@@ -152,29 +157,14 @@ voice_agent/
 |---|---|---|
 | Web Framework | Django 4.2+ | Backend, sessions, routing, templates |
 | Speech-to-Text | Groq Whisper Large v3 | Deep Learning STT — 1.5B param Transformer |
-| Language Model | Groq LLaMA 3.3 70B Versatile | Free API, handles tool-use well |
+| Language Model | Groq LLaMA 3.3 70B Versatile | Free API, ultra-fast responses |
 | Web Search | Tavily REST API | Live news, scores, prices, current events |
+| Song Recognition | Genius REST API | Identify songs from lyrics snippets |
 | Audio Capture | MediaRecorder API | Browser — records WebM blob |
 | Text-to-Speech | Web SpeechSynthesis API | Browser built-in, 8-level English voice picker |
 | Session Memory | Django Sessions + SQLite | Stores last 10 conversation turns |
 | Env Config | python-dotenv | Loads keys from .env securely |
-| Fonts | Manrope + Martian Mono | Google Fonts — loaded via CDN |
- 
----
- 
-## 🎨 UI Overview
- 
-NOVA's interface is built entirely with vanilla HTML, CSS, and JavaScript inside Django templates.
- 
-**Topbar** contains the NOVA brand mark, active model chip, turn counter, status pill, and three icon buttons — theme toggle, info panel, and new session.
- 
-**Transcript Feed** is the scrollable conversation area. Messages animate in from below. A typing indicator (three bouncing dots) appears while NOVA is thinking.
- 
-**Controls** sit at the bottom — a status bar with an animated indicator dot, the large push-to-talk mic button with ripple rings, and a text input fallback.
- 
-**Info Panel** slides in from the right and shows the full tech stack, the deep learning core description, and live session stats (turns + status). It can be closed by clicking the X button, clicking the backdrop, or pressing `Escape`.
- 
-**Theme** defaults to dark and can be toggled to light mode. The preference is saved in `localStorage` and restored on next visit.
+| Fonts | Manrope + Martian Mono | Google Fonts CDN |
  
 ---
  
@@ -185,8 +175,22 @@ NOVA automatically detects when a question needs live data using keyword pattern
 the Tavily API to fetch current results before answering. The web context is injected
 into the LLaMA prompt but is **not** saved to session history to keep memory clean.
  
-The response JSON includes `"web_search_used": true/false` for debugging.
+---
  
+## 🎵 Song Recognition Behaviour
+ 
+NOVA detects lyrics-related keywords (`lyrics`, `who sings`, `what song`, `goes like`,
+`sounds like`, `who sang`, etc.) and calls the Genius API to search for the matching song.
+It returns the song title and artist name clearly in the reply.
+ 
+**Example queries that trigger song search:**
+- *"What song has the lyrics never gonna give you up"*
+- *"Who sings blinding lights"*
+- *"What song goes like we will rock you"*
+**Priority order in views.py:**
+1. Genius song search (if lyrics keywords detected)
+2. Tavily web search (if current events keywords detected)
+3. LLaMA answers from its own knowledge (everything else)
 ---
  
 ## 🔊 English TTS Voice Priority
@@ -197,14 +201,11 @@ The voice picker in `voice.js` follows an 8-level priority chain:
 2. Microsoft Aria Online Natural (en-US)
 3. Samantha (macOS)
 4. Any `en-US` Google voice
-5. Any `en-US` online (non-local) voice
+5. Any `en-US` online voice
 6. Any `en-US` voice
 7. Any `en-GB` voice
 8. Any English voice
-The selected voice name is logged in the browser console on load:
-```
-🔊 TTS voice: Google US English (en-US)
-```
+Selected voice is logged in browser console on load.
  
 ---
  
@@ -214,23 +215,22 @@ The selected voice name is logged in the browser console on load:
 - **Training data:** 680,000 hours of multilingual speech
 - **Parameters:** 1.5 Billion
 - **Inference:** Groq LPU — Language Processing Unit (custom AI silicon)
-- **Pipeline:** Mic → Whisper STT → (Tavily search) → LLaMA 3.3 70B → TTS
+- **Pipeline:** Mic → Whisper STT → (Genius / Tavily) → LLaMA 3.3 70B → TTS
 ---
  
 ## ❓ Troubleshooting
  
 | Problem | Solution |
 |---|---|
-| `GROQ_API_KEY not configured` | Check `.env` exists in `voice_agent/` root (not `.env.example`) |
+| `GROQ_API_KEY not configured` | Check `.env` exists in project root (not `.env.example`) |
 | Mic not working | Use Chrome or Edge — Firefox may not support `audio/webm` |
 | No speech detected | Hold button for at least 2 seconds and speak clearly |
-| Arabic / wrong language TTS | Open browser console — check which voice was selected |
-| Theme not saving | Make sure localStorage is not blocked in your browser |
-| Info panel not opening | Check browser console for JS errors |
+| Arabic / wrong language TTS | Check browser console for selected voice name |
+| Song not recognized | Try saying "what song has the lyrics..." clearly |
 | Port 8000 in use | Run: `python manage.py runserver 8080` |
 | pydantic install error | Run: `pip install --only-binary=:all: pydantic pydantic-core` first |
-| `No module named django` | Make sure venv is activated before running manage.py |
-| `manage.py not found` | You're in the wrong folder — run `cd voice_agent` first |
+| `No module named django` | Activate venv first: `.venv\Scripts\activate` |
+| `manage.py not found` | Wrong folder — run `cd voice_agent` first |
  
 ---
  
@@ -243,18 +243,17 @@ python-dotenv>=1.0.0
 requests>=2.31.0
 ```
  
-> **Note:** `pydantic` and `pydantic-core` must be installed as pre-built binaries
-> using `--only-binary=:all:` to avoid the Rust compiler requirement on Windows.
+> Note: `pydantic` and `pydantic-core` are installed as pre-built binaries
+> (`--only-binary=:all:`) to avoid the Rust compiler requirement on Windows.
  
 ---
  
 ## 👥 Team
  
-| Name | Roll no  | Roll  |
-|---|---|---|
-| Muhammad Sohaib Hafeez | 24F-CS-085 | Backend |
-| Maham Siddiqui  | 24F-CS-070 | Backend |
-| Mubashir Awan | 24F-CS-074 | Frontend |
+| Name | Role |
+|---|---|
+| Muhammad Sohaib Hafeez (Roll: 24F-CS-085) | Backend — Django, Groq API, Tavily, Genius, views.py |
+| Maham Siddiqui (Roll: 70) | Frontend — HTML, CSS, JS, theme toggle, info panel |
  
 ---
  
