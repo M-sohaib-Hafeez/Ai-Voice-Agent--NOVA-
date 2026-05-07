@@ -10,6 +10,8 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-voice-agent-dev-key
 
 TAVILY_API_KEY = os.getenv('TAVILY_API_KEY', '')
 
+GENIUS_API_KEY = os.getenv('GENIUS_API_KEY', '')
+
 DEBUG = True
 
 ALLOWED_HOSTS = ['*']
@@ -64,8 +66,6 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Groq API Key (loaded from .env)
 GROQ_API_KEY = os.getenv('GROQ_API_KEY', '')
 
-# Conversation memory (max turns kept)
 MAX_HISTORY_TURNS = 10
