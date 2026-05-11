@@ -289,6 +289,7 @@ requests>=2.31.0
 |---|---|
 | Muhammad Sohaib Hafeez (Roll: 24F-CS-085) | Backend — Django, Groq, Tavily, ACRCloud, Genius, views.py |
 | Maham Siddiqui (Roll: 70) | Frontend — HTML, CSS, JS, theme toggle, info panel, UI redesign |
+| Mubashir Awan Hafeez (Roll: 24F-CS-074) | Backend — Django, views.py & Frontend — HTML, CSS, JS|
  
 ---
  
