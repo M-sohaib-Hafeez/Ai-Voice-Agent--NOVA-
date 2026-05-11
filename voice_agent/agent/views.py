@@ -37,7 +37,7 @@ _WEB_SEARCH_PATTERNS = re.compile(
     r'who (is|are|won|leads)|what (is|are) the (latest|current|today)|'
     r'did .* (win|lose|happen)|'
     r'2024|2025|2026)\b',
-    re.IGNORECASEA
+    re.IGNORECASE
 )
 
 _LYRICS_PATTERNS = re.compile(
