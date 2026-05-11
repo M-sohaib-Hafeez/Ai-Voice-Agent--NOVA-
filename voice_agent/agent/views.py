@@ -6,6 +6,7 @@ import os
 import re
 import tempfile
 import time
+import unicodedata
 import requests as _requests
 
 from django.conf import settings
@@ -17,15 +18,15 @@ from django.views.decorators.http import require_http_methods
 from groq import Groq
 
 # ── API keys ──────────────────────────────────────────────────────────────────
-_tavily_key = getattr(settings, 'TAVILY_API_KEY', '')
-_genius_key = getattr(settings, 'GENIUS_API_KEY', '')
-_acr_host = getattr(settings, 'ACR_HOST', '')
-_acr_key = getattr(settings, 'ACR_ACCESS_KEY', '')
+_tavily_key = getattr(settings, 'TAVILY_API_KEY',    '')
+_genius_key = getattr(settings, 'GENIUS_API_KEY',    '')
+_acr_host   = getattr(settings, 'ACR_HOST',          '')
+_acr_key    = getattr(settings, 'ACR_ACCESS_KEY',    '')
 _acr_secret = getattr(settings, 'ACR_ACCESS_SECRET', '')
 
 _tavily = bool(_tavily_key)
 _genius = bool(_genius_key)
-_acr = bool(_acr_host and _acr_key and _acr_secret)
+_acr    = bool(_acr_host and _acr_key and _acr_secret)
 
 # ── Groq client ───────────────────────────────────────────────────────────────
 client = Groq(api_key=settings.GROQ_API_KEY)
@@ -42,15 +43,27 @@ _WEB_SEARCH_PATTERNS = re.compile(
 
 _LYRICS_PATTERNS = re.compile(
     r'\b(lyric|lyrics|what song|which song|who sings|who sang|'
-    r'what\'s this song|name this song|identify (this )?song|'
+    r"what's this song|name this song|identify (this )?song|"
     r'song with|the song (that|where|which)|find (the )?song|'
     r'singer|artist|what band|who made|who wrote|'
     r'goes like|sounds like|the words|the line)\b',
     re.IGNORECASE
 )
 
+# ── Whisper known hallucination phrases ───────────────────────────────────────
+_WHISPER_HALLUCINATIONS = {
+    'thank you', 'thanks', 'thank you.', 'thanks.',
+    'you', 'the', 'a', '.', '...', 'bye', 'bye.',
+    'goodbye', 'goodbye.', 'please', 'sorry',
+    'thank you for watching', 'thank you for watching.',
+    'thanks for watching', 'thanks for watching.',
+    'thank you very much', 'thank you very much.',
+    'subtitles by', 'subscribe', 'like and subscribe',
+}
 
-# ── Detect query type ─────────────────────────────────────────────────────────
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
 def _needs_web_search(text: str) -> bool:
     return bool(_WEB_SEARCH_PATTERNS.search(text))
 
@@ -59,27 +72,35 @@ def _needs_lyrics_search(text: str) -> bool:
     return bool(_LYRICS_PATTERNS.search(text))
 
 
+def _is_gibberish(text: str) -> bool:
+    """
+    Detect when Whisper transcribes music/noise as non-Latin script gibberish.
+    When music plays, Whisper often outputs Hindi/Devanagari/Arabic characters
+    instead of the user's speech. We detect this by checking if the majority
+    of characters fall outside basic Latin Unicode range.
+    """
+    if not text:
+        return False
+    letters = [c for c in text if c.isalpha()]
+    if not letters:
+        return False
+    non_latin = sum(1 for c in letters if ord(c) > 591)
+    return (non_latin / len(letters)) > 0.6
+
+
 # ── ACRCloud audio fingerprint recognition ────────────────────────────────────
+
 def _acr_recognize(audio_bytes: bytes) -> dict | None:
     """
     Send audio bytes to ACRCloud for song recognition via audio fingerprinting.
-    Returns a dict with title, artist, album, etc. or None if not recognized.
+    Returns a dict with title, artists, album, genres or None if not recognized.
     Uses HMAC-SHA1 signature authentication as required by ACRCloud API.
     """
     if not _acr:
         return None
     try:
-        # Build HMAC-SHA1 signature (ACRCloud requirement)
-        http_method = 'POST'
-        http_uri = '/v1/identify'
-        data_type = 'audio'
-        signature_version = '1'
-        timestamp = str(int(time.time()))
-
-        string_to_sign = '\n'.join([
-            http_method, http_uri, _acr_key,
-            data_type, signature_version, timestamp
-        ])
+        timestamp      = str(int(time.time()))
+        string_to_sign = '\n'.join(['POST', '/v1/identify', _acr_key, 'audio', '1', timestamp])
         sign = base64.b64encode(
             hmac.new(
                 _acr_secret.encode('utf-8'),
@@ -88,62 +109,50 @@ def _acr_recognize(audio_bytes: bytes) -> dict | None:
             ).digest()
         ).decode('utf-8')
 
-        # POST to ACRCloud
-        url = f'https://{_acr_host}/v1/identify'
-        files = {'sample': ('audio.webm', audio_bytes, 'audio/webm')}
-        data = {
-            'access_key': _acr_key,
-            'sample_bytes': len(audio_bytes),
-            'timestamp': timestamp,
-            'signature': sign,
-            'data_type': data_type,
-            'signature_version': signature_version,
-        }
-
-        resp = _requests.post(url, files=files, data=data, timeout=10)
+        resp = _requests.post(
+            f'https://{_acr_host}/v1/identify',
+            files={'sample': ('audio.webm', audio_bytes, 'audio/webm;codecs=opus')},
+            data={
+                'access_key':        _acr_key,
+                'sample_bytes':      str(len(audio_bytes)),
+                'timestamp':         timestamp,
+                'signature':         sign,
+                'data_type':         'audio',
+                'signature_version': '1',
+            },
+            timeout=10,
+        )
         result = resp.json()
 
-        # ACRCloud returns code 0 for a successful match
-        status_code = result.get('status', {}).get('code', -1)
-        if status_code != 0:
-            return None  # No match found — silent fallback
+        if result.get('status', {}).get('code', -1) != 0:
+            return None
 
-        # Extract song metadata
-        music = result.get('metadata', {}).get('music', [{}])[0]
-        title = music.get('title', 'Unknown')
+        music   = result.get('metadata', {}).get('music', [{}])[0]
+        title   = music.get('title', 'Unknown')
         artists = ', '.join(a.get('name', '') for a in music.get('artists', []))
-        album = music.get('album', {}).get('name', '')
-        genres = ', '.join(g.get('name', '') for g in music.get('genres', []))
+        album   = music.get('album', {}).get('name', '')
+        genres  = ', '.join(g.get('name', '') for g in music.get('genres', []))
+        isrc    = music.get('external_ids', {}).get('isrc', '')
 
-        # Extract 3rd party links if available
-        spotify_id = ''
-        ext_ids = music.get('external_ids', {})
-        if ext_ids.get('isrc'):
-            spotify_id = ext_ids['isrc']
-
-        return {
-            'title': title,
-            'artists': artists,
-            'album': album,
-            'genres': genres,
-            'isrc': spotify_id,
-        }
+        return {'title': title, 'artists': artists, 'album': album,
+                'genres': genres, 'isrc': isrc}
 
     except Exception:
-        return None  # Always fail silently — don't break the pipeline
+        return None
 
 
 def _format_acr_result(song: dict) -> str:
     """Format ACRCloud result into a context string for LLaMA."""
-    result = f'[Song recognition result]: Song: "{song["title"]}" by {song["artists"]}.'
+    ctx = f'[Song recognition result]: Song: "{song["title"]}" by {song["artists"]}.'
     if song.get('album'):
-        result += f' Album: {song["album"]}.'
+        ctx += f' Album: {song["album"]}.'
     if song.get('genres'):
-        result += f' Genre: {song["genres"]}.'
-    return result
+        ctx += f' Genre: {song["genres"]}.'
+    return ctx
 
 
 # ── Tavily web search ─────────────────────────────────────────────────────────
+
 def _web_search(query: str) -> str:
     if not _tavily_key:
         return ''
@@ -151,48 +160,47 @@ def _web_search(query: str) -> str:
         resp = _requests.post(
             'https://api.tavily.com/search',
             json={
-                'api_key': _tavily_key,
-                'query': query,
-                'search_depth': 'basic',
-                'max_results': 3,
+                'api_key':        _tavily_key,
+                'query':          query,
+                'search_depth':   'basic',
+                'max_results':    3,
                 'include_answer': True,
             },
             timeout=8,
         )
         data = resp.json()
-        answer = data.get('answer', '')
-        if answer:
-            return f'[Web search result]: {answer}'
+        if data.get('answer'):
+            return f'[Web search result]: {data["answer"]}'
         snippets = [r.get('content', '')[:300] for r in data.get('results', [])[:3]]
         return '[Web search results]:\n' + '\n---\n'.join(snippets)
     except Exception:
         return ''
 
 
-# ── Genius lyrics search (fallback for text-based song queries) ───────────────
+# ── Genius lyrics search ──────────────────────────────────────────────────────
+
 def _search_lyrics(query: str) -> str:
     if not _genius_key:
         return ''
     try:
-        clean_query = re.sub(
+        clean = re.sub(
             r'\b(what song|which song|who sings|who sang|lyrics|lyric|'
             r'goes like|sounds like|the words|identify|find the song|'
-            r'name this song|what\'s this song|song with|the line)\b',
+            r"name this song|what's this song|song with|the line)\b",
             '', query, flags=re.IGNORECASE
         ).strip() or query
 
         resp = _requests.get(
             'https://api.genius.com/search',
             headers={'Authorization': f'Bearer {_genius_key}'},
-            params={'q': clean_query},
+            params={'q': clean},
             timeout=8,
         )
         hits = resp.json().get('response', {}).get('hits', [])
         if not hits:
             return ''
-
-        top = hits[0]['result']
-        title = top.get('title', 'Unknown')
+        top    = hits[0]['result']
+        title  = top.get('title', 'Unknown')
         artist = top.get('primary_artist', {}).get('name', 'Unknown')
         return f'[Lyrics search result]: Song: "{title}" by {artist}.'
     except Exception:
@@ -200,6 +208,7 @@ def _search_lyrics(query: str) -> str:
 
 
 # ── System prompt ─────────────────────────────────────────────────────────────
+
 SYSTEM_PROMPT = """You are NOVA — an intelligent, friendly AI voice assistant built with Whisper (deep learning STT) and LLaMA via Groq.
 
 CRITICAL LANGUAGE RULE: You MUST ALWAYS respond in English only. No matter what language the user speaks in — your reply must ALWAYS be in English. Never switch to Arabic, Urdu, or any other language under any circumstances.
@@ -220,8 +229,8 @@ Rules:
 - Be encouraging and helpful
 """
 
-
 # ── Session history ───────────────────────────────────────────────────────────
+
 def _get_history(request):
     return request.session.get('chat_history', [])
 
@@ -244,10 +253,12 @@ def index(request):
 @require_http_methods(["POST"])
 def transcribe_audio(request):
     """
+    Pipeline:
     1. Receive audio blob from browser
     2. Run ACRCloud audio fingerprint recognition (song detection)
-    3. Run Groq Whisper transcription (speech-to-text)
-    4. Return both transcript + song_detected to frontend
+    3. Run Groq Whisper STT (speech-to-text via verbose_json)
+    4. Filter Whisper hallucinations, non-Latin gibberish, and silence
+    5. Return transcript + song_detected to frontend
     """
     if not settings.GROQ_API_KEY:
         return JsonResponse({'error': 'GROQ_API_KEY not configured in .env'}, status=500)
@@ -257,15 +268,12 @@ def transcribe_audio(request):
         return JsonResponse({'error': 'No audio file received'}, status=400)
 
     try:
-        # Read audio bytes once — used for both ACRCloud and Whisper
         audio_bytes = audio_file.read()
 
-        # ── Step 1: ACRCloud song recognition (runs on same audio blob) ──────
-        song_detected = None
-        if _acr:
-            song_detected = _acr_recognize(audio_bytes)
+        # Step 1 — ACRCloud song recognition
+        song_detected = _acr_recognize(audio_bytes) if _acr else None
 
-        # ── Step 2: Whisper transcription ─────────────────────────────────────
+        # Step 2 — Whisper STT via Groq (verbose_json for segment-level data)
         with tempfile.NamedTemporaryFile(delete=False, suffix='.webm') as tmp:
             tmp.write(audio_bytes)
             tmp_path = tmp.name
@@ -274,17 +282,45 @@ def transcribe_audio(request):
             transcription = client.audio.transcriptions.create(
                 file=(os.path.basename(tmp_path), f, 'audio/webm'),
                 model='whisper-large-v3',
-                response_format='text',
-                language='en',
+                response_format='verbose_json',
                 prompt='Transcribe the following English speech.',
             )
-
         os.unlink(tmp_path)
-        transcript_text = transcription if isinstance(transcription, str) else transcription.text
+
+        # Step 3 — Extract transcript
+        transcript_text = ''
+        if hasattr(transcription, 'text') and transcription.text:
+            transcript_text = transcription.text.strip()
+
+        # Step 4 — Compute average no_speech_prob across segments
+        no_speech_prob = 0.0
+        if hasattr(transcription, 'segments') and transcription.segments:
+            probs = []
+            for seg in transcription.segments:
+                if hasattr(seg, 'no_speech_prob'):
+                    probs.append(seg.no_speech_prob)
+                elif isinstance(seg, dict) and 'no_speech_prob' in seg:
+                    probs.append(seg['no_speech_prob'])
+            if probs:
+                no_speech_prob = sum(probs) / len(probs)
+
+        # Step 5 — Filter bad transcripts
+        # 5a. Known Whisper hallucination phrases (silence/noise artifacts)
+        if transcript_text.lower() in _WHISPER_HALLUCINATIONS:
+            transcript_text = ''
+
+        # 5b. Non-Latin gibberish — Whisper "hears" music as Hindi/Arabic characters
+        #     Only suppress if song was detected (confirms it's music, not real speech)
+        if song_detected and _is_gibberish(transcript_text):
+            transcript_text = ''
+
+        # 5c. Very short output with high silence probability = noise/silence
+        if no_speech_prob > 0.85 and len(transcript_text.split()) <= 2:
+            transcript_text = ''
 
         return JsonResponse({
-            'transcript': transcript_text.strip(),
-            'song_detected': song_detected,  # None or {title, artists, album, genres}
+            'transcript':    transcript_text,
+            'song_detected': song_detected,
         })
 
     except Exception as e:
@@ -295,52 +331,47 @@ def transcribe_audio(request):
 @require_http_methods(["POST"])
 def chat(request):
     """
-    Priority order for context injection:
-    1. ACRCloud song_detected (passed from frontend via JSON body)
-    2. Genius lyrics search (if lyrics keywords in text)
-    3. Tavily web search (if current events keywords in text)
-    4. LLaMA answers from its own knowledge
+    Context injection priority:
+    1. ACRCloud song_detected (audio fingerprint — highest priority)
+    2. Genius lyrics search (text-based song query fallback)
+    3. Tavily web search (live current events)
+    4. LLaMA own knowledge (default)
     """
     if not settings.GROQ_API_KEY:
         return JsonResponse({'error': 'GROQ_API_KEY not configured in .env'}, status=500)
 
     try:
-        body = json.loads(request.body)
+        body         = json.loads(request.body)
         user_message = body.get('message', '').strip()
-        song_info = body.get('song_detected', None)  # passed from voice.js
+        song_info    = body.get('song_detected', None)
     except (json.JSONDecodeError, AttributeError):
         return JsonResponse({'error': 'Invalid JSON body'}, status=400)
 
     if not user_message and not song_info:
         return JsonResponse({'error': 'Empty message'}, status=400)
 
-    # If no speech but song detected — create a message automatically
     if not user_message and song_info:
         user_message = 'What song is this?'
 
-    # ── Context injection ─────────────────────────────────────────────────────
+    # Context injection
     extra_context = ''
-    used_acr = False
-    used_lyrics = False
-    used_web = False
+    used_acr      = False
+    used_lyrics   = False
+    used_web      = False
 
-    # 1. ACRCloud result (highest priority — actual audio recognition)
     if song_info:
         extra_context = _format_acr_result(song_info)
-        used_acr = True
-
-    # 2. Genius lyrics search (text-based query)
-    if not extra_context and _genius and _needs_lyrics_search(user_message):
+        used_acr      = True
+    elif _genius and _needs_lyrics_search(user_message):
         extra_context = _search_lyrics(user_message)
-        used_lyrics = bool(extra_context)
+        used_lyrics   = bool(extra_context)
 
-    # 3. Tavily web search
     if not extra_context and _tavily and _needs_web_search(user_message):
         extra_context = _web_search(user_message)
-        used_web = bool(extra_context)
+        used_web      = bool(extra_context)
 
-    # ── Build messages ────────────────────────────────────────────────────────
-    history = _get_history(request)
+    # Build message list with history
+    history  = _get_history(request)
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     messages.extend(history)
 
@@ -348,7 +379,6 @@ def chat(request):
     if extra_context:
         augmented = f"{user_message}\n\n{extra_context}"
     augmented += "\n\n[Reminder: Reply in English only.]"
-
     messages.append({"role": "user", "content": augmented})
 
     try:
@@ -360,17 +390,17 @@ def chat(request):
         )
         ai_reply = response.choices[0].message.content.strip()
 
-        # Save clean history (no injected context)
-        history.append({"role": "user", "content": user_message})
+        # Save clean history (without injected context)
+        history.append({"role": "user",      "content": user_message})
         history.append({"role": "assistant", "content": ai_reply})
         _save_history(request, history)
 
         return JsonResponse({
-            'reply': ai_reply,
-            'history_length': len(history) // 2,
-            'acr_used': used_acr,
+            'reply':           ai_reply,
+            'history_length':  len(history) // 2,
+            'acr_used':        used_acr,
             'web_search_used': used_web,
-            'lyrics_used': used_lyrics,
+            'lyrics_used':     used_lyrics,
         })
 
     except Exception as e:
