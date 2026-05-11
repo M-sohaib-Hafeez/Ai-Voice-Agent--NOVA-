@@ -10,6 +10,8 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-voice-agent-dev-key
 
 TAVILY_API_KEY = os.getenv('TAVILY_API_KEY', '')
 
+GENIUS_API_KEY = os.getenv('GENIUS_API_KEY', '')
+
 ACR_HOST          = os.getenv('ACR_HOST', '')
 
 ACR_ACCESS_KEY    = os.getenv('ACR_ACCESS_KEY', '')
