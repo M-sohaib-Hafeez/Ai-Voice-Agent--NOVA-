@@ -22,15 +22,20 @@ const panelStatus     = document.getElementById('panel-status');
 
 const mainEl          = document.querySelector('.main');
 
-let mediaRecorder    = null;
-let audioChunks      = [];
-let isRecording      = false;
-let isBusy           = false;
-let turns            = 0;
-let currentUtterance = null;
-let panelOpen        = false;
+let mediaRecorder      = null;
+let audioChunks        = [];
+let isRecording        = false;
+let isBusy             = false;
+let turns              = 0;
+let currentUtterance   = null;
+let panelOpen          = false;
+
+// ── Stores ACRCloud song result from transcribe response ──────────────────────
+// Cleared after each chat turn to prevent "memory leak"
+let detectedSongContext = null;
 
 
+// ── Theme ─────────────────────────────────────────────────────────────────────
 function getTheme() {
   return localStorage.getItem('nova-theme') || 'dark';
 }
@@ -41,23 +46,20 @@ function applyTheme(theme) {
 }
 
 function toggleTheme() {
-  const current = getTheme();
-  applyTheme(current === 'dark' ? 'light' : 'dark');
+  applyTheme(getTheme() === 'dark' ? 'light' : 'dark');
 }
 
 applyTheme(getTheme());
 
 
+// ── Info panel ────────────────────────────────────────────────────────────────
 function openPanel() {
   panelOpen = true;
   infoPanel.classList.add('open');
   infoPanel.setAttribute('aria-hidden', 'false');
   panelBackdrop.classList.add('open');
   infoBtn.classList.add('active');
-  // Only push main on wider screens
-  if (window.innerWidth > 600) {
-    mainEl.classList.add('panel-open');
-  }
+  if (window.innerWidth > 600) mainEl.classList.add('panel-open');
 }
 
 function closePanel() {
@@ -73,6 +75,8 @@ function togglePanel() {
   panelOpen ? closePanel() : openPanel();
 }
 
+
+// ── Status helpers ────────────────────────────────────────────────────────────
 const STATUS_LABELS = {
   idle:      'Idle',
   recording: 'Recording',
@@ -81,13 +85,11 @@ const STATUS_LABELS = {
 };
 
 function setStatus(msg, type = 'idle') {
-  statusText.textContent = msg;
-  const label = STATUS_LABELS[type] || type;
-  statusDot.textContent = label;
-  statusDot.className   = `stat-val status-${type}`;
-
+  statusText.textContent    = msg;
+  const label               = STATUS_LABELS[type] || type;
+  statusDot.textContent     = label;
+  statusDot.className       = `stat-val status-${type}`;
   statusIndicator.className = `status-indicator ${type !== 'idle' ? type : ''}`;
-  
   if (panelStatus) {
     panelStatus.textContent = label;
     panelStatus.className   = `session-val session-status status-${type}`;
@@ -113,19 +115,18 @@ function updateTurns(n) {
   if (panelTurns) panelTurns.textContent = n;
 }
 
+
+// ── Message rendering ─────────────────────────────────────────────────────────
 function addMessage(role, text, extraClass = '') {
   clearWelcome();
-  const div    = document.createElement('div');
-  div.className = `msg ${role} ${extraClass}`.trim();
-
-  const meta    = document.createElement('div');
-  meta.className = 'msg-meta';
+  const div        = document.createElement('div');
+  div.className    = `msg ${role} ${extraClass}`.trim();
+  const meta       = document.createElement('div');
+  meta.className   = 'msg-meta';
   meta.textContent = role === 'user' ? 'You' : 'NOVA';
-
-  const bubble   = document.createElement('div');
-  bubble.className = 'msg-bubble';
-  bubble.textContent = text;
-
+  const bubble         = document.createElement('div');
+  bubble.className     = 'msg-bubble';
+  bubble.textContent   = text;
   div.appendChild(meta);
   div.appendChild(bubble);
   transcriptFeed.appendChild(div);
@@ -135,7 +136,7 @@ function addMessage(role, text, extraClass = '') {
 
 function addTypingIndicator() {
   clearWelcome();
-  const div = document.createElement('div');
+  const div     = document.createElement('div');
   div.className = 'msg nova msg-typing';
   div.innerHTML = `
     <div class="msg-meta">NOVA</div>
@@ -149,6 +150,24 @@ function addTypingIndicator() {
   return div;
 }
 
+// ── Song detected banner ──────────────────────────────────────────────────────
+function addSongBanner(song) {
+  clearWelcome();
+  const div     = document.createElement('div');
+  div.className = 'msg nova';
+  const meta       = document.createElement('div');
+  meta.className   = 'msg-meta';
+  meta.textContent = '🎵 NOVA';
+  const bubble       = document.createElement('div');
+  bubble.className   = 'msg-bubble msg-song';
+  bubble.innerHTML   = `<strong>${song.title}</strong> — ${song.artists}` +
+                       (song.album ? `<br><small>${song.album}</small>` : '');
+  div.appendChild(meta);
+  div.appendChild(bubble);
+  transcriptFeed.appendChild(div);
+  scrollFeed();
+}
+
 function setBusy(busy) {
   isBusy             = busy;
   micBtn.disabled    = busy;
@@ -156,6 +175,8 @@ function setBusy(busy) {
   textInput.disabled = busy;
 }
 
+
+// ── TTS ───────────────────────────────────────────────────────────────────────
 function getEnglishVoice() {
   const voices = window.speechSynthesis.getVoices();
   return (
@@ -189,6 +210,15 @@ function speak(text) {
   });
 }
 
+
+// ── API calls ─────────────────────────────────────────────────────────────────
+
+/**
+ * transcribeAudio — sends audio blob to Django /api/transcribe/
+ * Returns { transcript, song_detected }
+ * song_detected is either null or { title, artists, album, genres }
+ * from ACRCloud audio fingerprinting
+ */
 async function transcribeAudio(blob) {
   const formData = new FormData();
   formData.append('audio', blob, 'recording.webm');
@@ -200,23 +230,52 @@ async function transcribeAudio(blob) {
   });
   const data = await res.json();
   if (!res.ok || data.error) throw new Error(data.error || 'Transcription failed');
+
+  // Store song context globally so runPipeline can pass it to /api/chat/
+  detectedSongContext = data.song_detected || null;
+
+  if (detectedSongContext) {
+    console.log('🎵 ACRCloud detected:', detectedSongContext);
+  }
+
   return data.transcript;
 }
 
+/**
+ * sendChat — sends transcript + optional song_detected to Django /api/chat/
+ * song_detected is "hitchhiked" along with the message
+ */
 async function sendChat(message) {
+  const payload = {
+    message,
+    song_detected: detectedSongContext,   // null or ACRCloud result object
+  };
+
   const res  = await fetch('/api/chat/', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-    body:    JSON.stringify({ message }),
+    body:    JSON.stringify(payload),
   });
   const data = await res.json();
   if (!res.ok || data.error) throw new Error(data.error || 'Chat failed');
+
+  // Clear song context after use — prevents "memory leak" across turns
+  detectedSongContext = null;
+
   return data;
 }
 
+
+// ── Main pipeline ─────────────────────────────────────────────────────────────
 async function runPipeline(userText) {
   try {
     setBusy(true);
+
+    // Show song banner in UI if ACRCloud detected a song
+    if (detectedSongContext) {
+      addSongBanner(detectedSongContext);
+    }
+
     addMessage('user', userText);
     updateTurns(turns + 1);
 
@@ -225,11 +284,16 @@ async function runPipeline(userText) {
     const chatData = await sendChat(userText);
     typingEl.remove();
 
-    const reply = chatData.reply;
-    addMessage('nova', reply);
+    addMessage('nova', chatData.reply);
 
-    await speak(reply);
+    // Debug log
+    if (chatData.acr_used)        console.log('🎵 ACRCloud used for this reply');
+    if (chatData.web_search_used) console.log('🌐 Tavily web search used');
+    if (chatData.lyrics_used)     console.log('🎤 Genius lyrics used');
+
+    await speak(chatData.reply);
     setStatus('Ready — press and hold to record', 'idle');
+
   } catch (err) {
     addMessage('nova', `⚠ Error: ${err.message}`, 'msg-error');
     setStatus('Error — try again', 'idle');
@@ -239,12 +303,18 @@ async function runPipeline(userText) {
   }
 }
 
+
+// ── Recording ─────────────────────────────────────────────────────────────────
 async function startRecording() {
   if (isRecording || isBusy) return;
   try {
+    // audioBitsPerSecond: 128000 = sweet spot for both Whisper STT and ACRCloud fingerprinting
     const stream  = await navigator.mediaDevices.getUserMedia({ audio: true });
     audioChunks   = [];
-    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+    mediaRecorder = new MediaRecorder(stream, {
+      mimeType:          'audio/webm',
+      audioBitsPerSecond: 128000,
+    });
 
     mediaRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) audioChunks.push(e.data);
@@ -263,15 +333,28 @@ async function startRecording() {
 
       try {
         setBusy(true);
-        setStatus('Transcribing with Whisper…', 'thinking');
+        setStatus('Recognising audio…', 'thinking');
         const transcript = await transcribeAudio(blob);
+
+        // Handle case: song detected but no speech
+        if ((!transcript || transcript.trim().length === 0) && detectedSongContext) {
+          setStatus('Song detected!', 'thinking');
+          await runPipeline('What song is this?');
+          showBars(false);
+          micBtn.classList.remove('recording');
+          return;
+        }
 
         if (!transcript || transcript.trim().length === 0) {
           setStatus('No speech detected — try again', 'idle');
           setBusy(false);
+          showBars(false);
+          micBtn.classList.remove('recording');
           return;
         }
+
         await runPipeline(transcript);
+
       } catch (err) {
         addMessage('nova', `⚠ Transcription error: ${err.message}`, 'msg-error');
         setStatus('Error — try again', 'idle');
@@ -305,6 +388,8 @@ function stopRecording() {
   setStatus('Processing audio…', 'thinking');
 }
 
+
+// ── Clear session ─────────────────────────────────────────────────────────────
 async function clearSession() {
   await fetch('/api/clear/', {
     method:  'POST',
@@ -331,15 +416,17 @@ async function clearSession() {
         <p class="welcome-sub">Hold the mic button and speak.<br/>NOVA will transcribe and reply.</p>
       </div>
     </div>`;
+  detectedSongContext = null;
   updateTurns(0);
   setStatus('Ready — press and hold to record', 'idle');
   window.speechSynthesis && window.speechSynthesis.cancel();
 }
 
+
+// ── Event listeners ───────────────────────────────────────────────────────────
 micBtn.addEventListener('mousedown',  (e) => { e.preventDefault(); startRecording(); });
 micBtn.addEventListener('mouseup',    stopRecording);
 micBtn.addEventListener('mouseleave', stopRecording);
-
 micBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startRecording(); }, { passive: false });
 micBtn.addEventListener('touchend',   (e) => { e.preventDefault(); stopRecording(); },  { passive: false });
 
@@ -358,7 +445,6 @@ clearBtn.addEventListener('click', clearSession);
 if (panelClearBtn) panelClearBtn.addEventListener('click', () => { clearSession(); closePanel(); });
 
 themeBtn.addEventListener('click', toggleTheme);
-
 infoBtn.addEventListener('click', togglePanel);
 panelClose.addEventListener('click', closePanel);
 panelBackdrop.addEventListener('click', closePanel);
@@ -368,11 +454,8 @@ document.addEventListener('keydown', (e) => {
 });
 
 window.addEventListener('resize', () => {
-  if (panelOpen && window.innerWidth <= 600) {
-    mainEl.classList.remove('panel-open');
-  } else if (panelOpen) {
-    mainEl.classList.add('panel-open');
-  }
+  if (panelOpen && window.innerWidth <= 600) mainEl.classList.remove('panel-open');
+  else if (panelOpen) mainEl.classList.add('panel-open');
 });
 
 if (window.speechSynthesis) {
@@ -383,7 +466,6 @@ if (window.speechSynthesis) {
   });
 }
 
-
 setStatus('Ready — press and hold to record', 'idle');
-console.log('🎙 NOVA v1.0 loaded — Whisper STT + Groq LLaMA + Django');
+console.log('🎙 NOVA v2.0 loaded — Whisper STT + ACRCloud + Groq LLaMA + Django');
 console.log(`🎨 Theme: ${getTheme()}`);
